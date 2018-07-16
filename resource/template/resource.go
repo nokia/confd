@@ -89,10 +89,14 @@ func NewTemplateResource(path string, config Config) (*TemplateResource, error) 
 	tr.syncOnly = config.SyncOnly
 	addFuncs(tr.funcMap, tr.store.FuncMap)
 
+        if config.Backend == "sdc"{
+	        addSdcFuncs(&tr)
+	}
+
 	if config.Prefix != "" {
 		tr.Prefix = config.Prefix
 	}
-
+       
 	if !strings.HasPrefix(tr.Prefix, "/") {
 		tr.Prefix = "/" + tr.Prefix
 	}
@@ -171,22 +175,156 @@ func addCryptFuncs(tr *TemplateResource) {
 	})
 }
 
+func addSdcFuncs(tr *TemplateResource) {
+	addFuncs(tr.funcMap, map[string]interface{}{
+		"getsdcv": func(scope string, key string) (string, error) {
+			keydir := strings.Split(key, "/")
+			key = ""
+			for _, dir := range keydir {
+				if dir == sdc.SdcScope.System || dir == "" {
+					continue
+				}
+				key = key + "/" + dir
+			}
+
+			scopeKey := ""
+			switch scope {
+			case "system":
+
+				scopeKey = "/" + sdc.SdcScope.System + key
+
+			case "local":
+				scopeKey = "/" + sdc.SdcScope.System + "/" + sdc.SdcScope.Local + key
+			case "any":
+				kv, err := tr.funcMap["get"].(func(string) (memkv.KVPair, error))("/" + sdc.SdcScope.System + key)
+				if err == nil {
+					return kv.Value, nil
+				}
+				kv, err = tr.funcMap["get"].(func(string) (memkv.KVPair, error))("/" + sdc.SdcScope.System + "/" + sdc.SdcScope.Local + key)
+				if err != nil {
+					return "", err
+				}
+				return kv.Value, nil
+			default:
+				return "", &memkv.KeyError{scope, memkv.ErrNoScope}
+			}
+
+			kv, err := tr.funcMap["get"].(func(string) (memkv.KVPair, error))(scopeKey)
+			if err != nil {
+				return "", err
+			}
+			return kv.Value, nil
+		},
+              "getconfigv": func(scope string, key string) (string, error){
+  		        keydir := strings.Split(key, "/")
+			key = ""
+			for _, dir := range keydir {
+				if dir == sdc.SdcScope.System || dir == "" || dir == "config" {
+					continue
+				}
+				key = key + "/" + dir
+			}
+                        
+                        key = "/config" + key
+			scopeKey := ""
+			switch scope {
+			case "system":
+
+				scopeKey = "/" + sdc.SdcScope.System + key
+
+			case "local":
+				scopeKey = "/" + sdc.SdcScope.System + "/" + sdc.SdcScope.Local + key
+			case "any":
+				kv, err := tr.funcMap["get"].(func(string) (memkv.KVPair, error))("/" + sdc.SdcScope.System + key)
+				if err == nil {
+					return kv.Value, nil
+				}
+				kv, err = tr.funcMap["get"].(func(string) (memkv.KVPair, error))("/" + sdc.SdcScope.System + "/" + sdc.SdcScope.Local + key)
+				if err != nil {
+					return "", err
+				}
+				return kv.Value, nil
+			default:
+				return "", &memkv.KeyError{scope, memkv.ErrNoScope}
+			}
+
+			kv, err := tr.funcMap["get"].(func(string) (memkv.KVPair, error))(scopeKey)
+			if err != nil {
+				return "", err
+			}
+			return kv.Value, nil
+             
+                },
+                 "getservicesv": func(scope string, key string) (string, error){
+  		        keydir := strings.Split(key, "/")
+			key = ""
+			for _, dir := range keydir {
+				if dir == sdc.SdcScope.System || dir == "" || dir == "services"{
+					continue
+				}
+				key = key + "/" + dir
+			}
+                        
+                        key = "/services" + key
+			scopeKey := ""
+			switch scope {
+			case "system":
+
+				scopeKey = "/" + sdc.SdcScope.System + key
+
+			case "local":
+				scopeKey = "/" + sdc.SdcScope.System + "/" + sdc.SdcScope.Local + key
+			case "any":
+				kv, err := tr.funcMap["get"].(func(string) (memkv.KVPair, error))("/" + sdc.SdcScope.System + key)
+				if err == nil {
+					return kv.Value, nil
+				}
+				kv, err = tr.funcMap["get"].(func(string) (memkv.KVPair, error))("/" + sdc.SdcScope.System + "/" + sdc.SdcScope.Local + key)
+				if err != nil {
+					return "", err
+				}
+				return kv.Value, nil
+			default:
+				return "", &memkv.KeyError{scope, memkv.ErrNoScope}
+			}
+
+			kv, err := tr.funcMap["get"].(func(string) (memkv.KVPair, error))(scopeKey)
+			if err != nil {
+				return "", err
+			}
+			return kv.Value, nil
+             
+                },
+
+	})
+}
+
 // setVars sets the Vars for template resource.
 func (t *TemplateResource) setVars() error {
 	var err error
 	log.Debug("Retrieving keys from store")
 	log.Debug("Key prefix set to " + t.Prefix)
 
-	result, err := t.storeClient.GetValues(util.AppendPrefix(t.Prefix, t.Keys))
+	result, err := t.storeClient.GetValues(appendPrefix(t.Prefix, t.Keys))
 	if err != nil {
-		return err
+             	return err
 	}
 	log.Debug("Got the following map from store: %v", result)
 
 	t.store.Purge()
 
 	for k, v := range result {
-		t.store.Set(path.Join("/", strings.TrimPrefix(k, t.Prefix)), v)
+		if t.backend != "sdc" {
+			t.store.Set(path.Join("/", strings.TrimPrefix(k, t.Prefix)), v)
+		} else {
+                        if sdc.SuStatus && !strings.Contains(k,"/services/") {
+                            t.store.Set(path.Join(t.Prefix, strings.TrimPrefix(k, t.Prefix + "_SU")), v)	
+                            t.store.Set(path.Join("/", strings.TrimPrefix(k, t.Prefix + "_SU")), v)
+                        }else{
+	                    t.store.Set(k, v)	
+                            t.store.Set(path.Join("/", strings.TrimPrefix(k, t.Prefix)), v)
+                        }
+		}
 	}
 	return nil
 }
